@@ -24,7 +24,7 @@
   let idSeq = 0;
   let errorTimer = null;
 
-  function isMatrixName(name) { return !!(registry[name] && registry[name].matrix); }
+  function isMatrixName(name) { return !!(registry[name] && (registry[name].matrixFn || registry[name].matrix)); }
   function ctxForParse() { return { isMatrix: isMatrixName }; }
 
   function showError(msg) {
@@ -43,7 +43,13 @@
       if (it.compiled.kind === "plain" || it.compiled.kind === "affine") {
         curves.push({ kind: "function", color: it.color, draw: it.compiled.draw, item: it });
       } else if (it.compiled.kind === "parametric") {
-        curves.push({ kind: "parametric", color: it.color, evalCurve: it.compiled.evalCurve, item: it });
+        curves.push({
+          kind: "parametric",
+          color: it.color,
+          evalCurve: it.compiled.evalCurve,
+          tRange: it.compiled.tRange,
+          item: it
+        });
       }
     }
     plotter.setCurves(curves);
@@ -59,13 +65,16 @@
   }
   function registerParsed(parsed) {
     if (parsed.type === "definition") registry[parsed.name] = { fn: parsed.fn };
-    else if (parsed.type === "matrixdef") registry[parsed.name] = { matrix: parsed.matrix };
+    else if (parsed.type === "matrixdef") {
+      if (parsed.matrixFn) registry[parsed.name] = { matrixFn: parsed.matrixFn };
+      else registry[parsed.name] = { matrix: parsed.matrix };
+    }
   }
   function unregisterParsed(parsed) {
     if (parsed.type === "definition") {
       if (registry[parsed.name] && registry[parsed.name].fn === parsed.fn) delete registry[parsed.name];
     } else if (parsed.type === "matrixdef") {
-      if (registry[parsed.name] && registry[parsed.name].matrix === parsed.matrix) delete registry[parsed.name];
+      if (registry[parsed.name] && (registry[parsed.name].matrixFn === parsed.matrixFn || registry[parsed.name].matrix === parsed.matrix)) delete registry[parsed.name];
     }
   }
 

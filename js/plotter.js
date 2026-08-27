@@ -234,9 +234,17 @@
       };
       const toScreen = (p) => this.toScreen(p[0], p[1]);
 
-      const SEG = Math.max(64, Math.ceil(w / 8));
-      const t0 = v.x0, t1 = v.x0 + (v.x1 - v.x0) * 1.5;
-      const dt = (t1 - t0) / SEG;
+      // t 范围: 曲线提供 tRange 则用逆矩阵反推, 否则覆盖视口 x
+      let t0, t1;
+      if (curve.tRange) {
+        const r = curve.tRange(v, reg);
+        t0 = r[0]; t1 = r[1];
+      } else {
+        t0 = v.x0; t1 = v.x0 + (v.x1 - v.x0) * 1.5;
+      }
+      const spanAbs = t1 - t0;
+      const SEG = Math.min(2048, Math.max(64, Math.ceil(w / 8)));
+      const dt = spanAbs / SEG;
       const steps = [];
       for (let i = 0; i <= SEG; i++) steps.push(evalP(t0 + i * dt));
 
@@ -262,24 +270,31 @@
         if (!pA || !pB) { started = false; prev = null; continue; }
         if (prev) started = true; // 段间连接
         plotPt(pA);
-        // 自适应细分: 中点与弦的屏幕偏差 > 0.7px 则继续细分
-        (function refine(tA, tB, k) {
-          const tm = (tA + tB) / 2;
-          const pm = evalP(tm);
-          if (!pm) return;
-          const [ax, ay] = toScreen(pA);
-          const [bx, by] = toScreen(pB);
-          const [mx, my] = toScreen(pm);
-          const len = Math.hypot(bx - ax, by - ay) || 1;
-          const dev = Math.abs((bx - ax) * (ay - my) - (ax - mx) * (by - ay)) / len;
-          if (dev > 0.7 && k < 10) {
-            refine(tA, tm, k + 1);
-            plotPt(pm);
-            refine(tm, tB, k + 1);
-          } else {
-            plotPt(pm);
-          }
-        })(t0 + i * dt, t0 + (i + 1) * dt, 0);
+        // 离屏段: 两端都远在视口外时只走直线, 不细分
+        const [ax0, ay0] = toScreen(pA);
+        const [bx0, by0] = toScreen(pB);
+        const bothOff = (ay0 < -40 && by0 < -40) || (ay0 > h + 40 && by0 > h + 40)
+          || (ax0 < -40 && bx0 < -40) || (ax0 > w + 40 && bx0 > w + 40);
+        if (!bothOff) {
+          // 自适应细分: 中点与弦的屏幕偏差 > 0.7px 则继续细分
+          (function refine(tA, tB, k) {
+            const tm = (tA + tB) / 2;
+            const pm = evalP(tm);
+            if (!pm) return;
+            const [ax, ay] = toScreen(pA);
+            const [bx, by] = toScreen(pB);
+            const [mx, my] = toScreen(pm);
+            const len = Math.hypot(bx - ax, by - ay) || 1;
+            const dev = Math.abs((bx - ax) * (ay - my) - (ax - mx) * (by - ay)) / len;
+            if (dev > 0.7 && k < 10) {
+              refine(tA, tm, k + 1);
+              plotPt(pm);
+              refine(tm, tB, k + 1);
+            } else {
+              plotPt(pm);
+            }
+          })(t0 + i * dt, t0 + (i + 1) * dt, 0);
+        }
         plotPt(pB);
       }
       ctx.stroke();

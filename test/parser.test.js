@@ -141,46 +141,78 @@ T("仿射 f₁(x) (Unicode 下标)", () => {
 });
 
 console.log("--- 矩阵定义与别名 ---");
+let ctxA = null;
 T("矩阵定义 A=M(0 1; 1 2)", () => {
   const it = P.parseGraphItem("A=M(0 1; 1 2)");
   if (it.type !== "matrixdef" || it.name !== "A") throw new Error("解析错误: " + it.type + "/" + it.name);
-  reg.A = { matrix: it.matrix };
+  reg.A = { matrixFn: it.matrixFn };
+  ctxA = { isMatrix: (n) => n === "A" };
 });
 T("矩阵别名 A f(x)", () => {
-  const ctx = { isMatrix: (n) => n === "A" };
-  const it = P.parseGraphItem("A f(x)", ctx);
-  if (it.type !== "parametric" || it.matrixRef !== "A") throw new Error("解析错误: " + it.type + "/" + it.matrixRef);
+  const it = P.parseGraphItem("A f(x)", ctxA);
+  if (it.type !== "parametric") throw new Error("解析错误: " + it.type);
+  if (it.mats.length !== 1 || it.mats[0].ref !== "A") throw new Error("mats 解析错误: " + JSON.stringify(it.mats));
   const c = P.compileItem(it, reg);
   const [X, Y] = c.evalCurve(2, reg);
   eq(X, 4, "X=1*f(2)=4");
   eq(Y, 10, "Y=t+2*f(t)=2+8");
 });
+T("tRange 视口反推覆盖", () => {
+  const c = P.compileItem(P.parseGraphItem("A f(x)", ctxA), reg);
+  const r = c.tRange({ x0: 0, x1: 10, y0: 0, y1: 10 }, reg);
+  if (!(r[0] <= -5.5 && r[1] >= 2.5)) throw new Error("t范围不对: " + JSON.stringify(r));
+});
 T("矩阵别名 A f", () => {
-  const ctx = { isMatrix: (n) => n === "A" };
-  const it = P.parseGraphItem("A f", ctx);
+  const it = P.parseGraphItem("A f", ctxA);
   const c = P.compileItem(it, reg);
   const [X, Y] = c.evalCurve(2, reg);
   eq(X, 4, "X");
   eq(Y, 10, "Y");
 });
 T("矩阵别名 A 2f", () => {
-  const ctx = { isMatrix: (n) => n === "A" };
-  const c = P.compileItem(P.parseGraphItem("A 2f", ctx), reg);
+  const c = P.compileItem(P.parseGraphItem("A 2f", ctxA), reg);
   const [X, Y] = c.evalCurve(2, reg);
   eq(X, 8, "X=2*f(2)");
   eq(Y, 18, "Y=t+2*2*f(t)");
 });
 T("矩阵重定义(负分量/逗号分隔)", () => {
   const it = P.parseGraphItem("A=M(0,-1,1,0)");
-  const c = P.compileItem(it, reg);
-  eq(c.matrix.a, 0, "a");
-  eq(c.matrix.b, -1, "b");
+  if (it.type !== "matrixdef") throw new Error("解析错误: " + it.type);
+  const m = it.matrixFn({});
+  eq(m.a, 0, "a");
+  eq(m.b, -1, "b");
 });
 T("矩阵未定义时报错", () => {
   const c = P.compileItem(P.parseGraphItem("A f(x)", { isMatrix: () => false }), {});
   let err = null;
   try { c.evalCurve(1, {}); } catch (e) { err = e; }
   if (!err) throw new Error("本应报错");
+});
+
+console.log("--- 用户函数调用与矩阵运算 ---");
+T("定义内调用用户函数 f_1(x)=2f(x)", () => {
+  const it = P.parseGraphItem("f_1(x)=2f(x)");
+  if (it.type !== "definition") throw new Error("解析错误: " + it.type);
+  reg.f_1 = { fn: it.fn };
+  eq(it.fn(3, reg), 18, "f_1(3)=2*f(3)");
+});
+T("矩阵链 A A f(x) 双重叠加", () => {
+  const c = P.compileItem(P.parseGraphItem("A A f(x)", ctxA), reg);
+  const [X, Y] = c.evalCurve(2, reg);
+  eq(X, 10, "A(A·(2,4))");
+  eq(Y, 24, "Y");
+});
+T("矩阵乘法定义 B=A*A", () => {
+  const it = P.parseGraphItem("B=A*A", ctxA);
+  if (it.type !== "matrixdef") throw new Error("解析错误: " + it.type);
+  const B = it.matrixFn({ A: { matrix: { a: 0, b: 1, c: 1, d: 2 } } });
+  eq(B.a, 1); eq(B.b, 2); eq(B.c, 2); eq(B.d, 5);
+});
+T("用户函数递归保护", () => {
+  const reg2 = { g: { fn: P.compileAst(P.parseMath("g(x)+1")) } };
+  let err = null;
+  try { P.compileAst(P.parseMath("g(x)"))(1, reg2); } catch (e) { err = e; }
+  if (!err || !/递归/.test(err.message)) throw new Error("本应递归报错");
 });
 
 console.log(failed ? "\n" + failed + " 个测试失败" : "\n全部通过");

@@ -76,8 +76,28 @@ T("绘制带渐近线函数 (1/x)", () => {
 T("绘制参数曲线 (矩阵变换)", () => {
   const it = P.parseGraphItem("M(0 1; 1 2)");
   const c = P.compileItem(it, { f: { fn: P.compileAst(P.parseMath("x^2")) } });
-  plotter.setCurves([{ kind: "parametric", color: "#000", evalCurve: c.evalCurve, item: null }]);
+  plotter.setRegistry({ f: { fn: P.compileAst(P.parseMath("x^2")) } });
+  plotter.setCurves([{ kind: "parametric", color: "#000", evalCurve: c.evalCurve, tRange: c.tRange, item: null }]);
   plotter.draw();
+});
+
+T("参数曲线垂直平移后仍覆盖视口 (拖动场景)", () => {
+  // 垂直拖动: 视口 y 发生大变化时, tRange 应随之移动(逆矩阵反推)
+  const it = P.parseGraphItem("M(0 1; 1 2)");
+  const reg = { f: { fn: P.compileAst(P.parseMath("sin(x)")) } };
+  const c = P.compileItem(it, reg);
+  plotter.setRegistry(reg);
+  plotter.setCurves([{ kind: "parametric", color: "#000", evalCurve: c.evalCurve, tRange: c.tRange, item: null }]);
+  for (const yoff of [0, 80, 160, -80]) {
+    plotter.view = { x0: -10, x1: 10, y0: 0 + yoff, y1: 20 + yoff };
+    plotter.draw();
+    const pts = plotter.curves[0].screenPts || [];
+    let near = false;
+    for (const p of pts) {
+      if (Math.abs(p[0] - 400) < 80 && Math.abs(p[1] - 300) < 30) { near = true; break; }
+    }
+    if (!near) throw new Error("垂直平移 " + yoff + " 后视口中央无曲线点 (pts=" + pts.length + ")");
+  }
 });
 
 T("视图平移缩放不抛异常", () => {
