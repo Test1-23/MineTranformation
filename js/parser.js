@@ -289,7 +289,9 @@
   // affine: draw(x, reg) -> y
   // parametric: evalCurve(t, reg) -> [X, Y]
   function compileItem(item, registry) {
-    if (item.type === "definition") return item;
+    if (item.type === "definition") {
+      return { kind: "plain", source: item.source, draw: item.fn };
+    }
     if (item.type === "plain") {
       return { kind: "plain", draw: item.fn, source: item.source };
     }
@@ -333,6 +335,7 @@
         kind: "parametric",
         source: item.source,
         evalCurve(t, reg) {
+          reg = reg || {};
           const y = baseEval(t, reg);
           return [matrix.a * t + matrix.b * y, matrix.c * t + matrix.d * y];
         }

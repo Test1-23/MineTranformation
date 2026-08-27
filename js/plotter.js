@@ -138,11 +138,13 @@
       ctx.textAlign = "center";
       for (let x = Math.ceil(v.x0 / xStep) * xStep; x <= v.x1; x += xStep) {
         const [sx] = this.toScreen(x, 0);
+        if (sx < -20 || sx > w + 20) continue;
         ctx.fillText(this.fmt(x), sx, h - 6);
       }
       ctx.textAlign = "right";
       for (let y = Math.ceil(v.y0 / yStep) * yStep; y <= v.y1; y += yStep) {
         const [, sy] = this.toScreen(0, y);
+        if (sy < -12 || sy > h + 12) continue;
         ctx.fillText(this.fmt(y), 40, sy + 4);
       }
     }
@@ -175,6 +177,7 @@
     }
 
     fmt(n) {
+      if (n === 0) return "0";
       const abs = Math.abs(n);
       if (abs >= 1e6 || abs < 1e-4) return n.toExponential(1).replace(/\+/, "");
       const v = Math.round(n * 1000) / 1000;

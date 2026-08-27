@@ -15,7 +15,7 @@
 
   const PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
-  // registry: name -> {fn, source}
+  // registry: 已定义函数 {name: {fn, source}}
   const registry = Object.create(null);
   // items: {id, text, parsed, compiled, color, error}
   const items = [];
@@ -35,6 +35,38 @@
     plotter.setCurves(curves);
     plotter.requestDraw();
     renderList();
+  }
+
+  function addItem(text) {
+    text = text.trim();
+    if (!text) return;
+    let parsed;
+    try {
+      parsed = P.parseGraphItem(text);
+    } catch (e) {
+      statusBar.textContent = "错误: " + e.message;
+      input.select();
+      return;
+    }
+    if (parsed.type === "definition") {
+      registry[parsed.name] = { fn: parsed.fn, source: parsed.source };
+    }
+    const compiled = P.compileItem(parsed, registry);
+    items.push({ id: idSeq++, text, parsed, compiled, color: PALETTE[items.length % PALETTE.length] });
+    input.value = "";
+    input.focus();
+    rebuild();
+  }
+
+  function removeItem(id) {
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const it = items[idx];
+    if (it.parsed.type === "definition") {
+      delete registry[it.parsed.name];
+    }
+    items.splice(idx, 1);
+    rebuild();
   }
 
   function renderList() {
@@ -65,41 +97,6 @@
     }
   }
 
-  function addItem(text) {
-    text = text.trim();
-    if (!text) return;
-    let parsed;
-    try {
-      parsed = P.parseGraphItem(text);
-    } catch (e) {
-      statusBar.textContent = "错误: " + e.message;
-      input.select();
-      return;
-    }
-    if (parsed.type === "definition") {
-      registry[parsed.name] = { fn: parsed.fn, source: parsed.source };
-      items.push({ id: idSeq++, text, parsed, compiled: parsed, color: PALETTE[items.length % PALETTE.length] });
-    } else {
-      const compiled = P.compileItem(parsed, registry);
-      items.push({ id: idSeq++, text, parsed, compiled, color: PALETTE[items.length % PALETTE.length] });
-    }
-    input.value = "";
-    input.focus();
-    rebuild();
-  }
-
-  function removeItem(id) {
-    const idx = items.findIndex((i) => i.id === id);
-    if (idx < 0) return;
-    const it = items[idx];
-    if (it.parsed.type === "definition") {
-      delete registry[it.parsed.name];
-      // 依赖该定义的变换会报错, 保持列出
-    }
-    items.splice(idx, 1);
-    rebuild();
-  }
-
   btnAdd.addEventListener("click", () => addItem(input.value));
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") addItem(input.value);
@@ -109,6 +106,9 @@
   document.getElementById("btn-reset").addEventListener("click", () => plotter.resetView());
   document.getElementById("btn-help").addEventListener("click", () => helpModal.classList.remove("hidden"));
   document.getElementById("btn-close-help").addEventListener("click", () => helpModal.classList.add("hidden"));
+  helpModal.addEventListener("click", (e) => {
+    if (e.target === helpModal) helpModal.classList.add("hidden");
+  });
 
   plotter.onHover = (x, y) => {
     statusBar.textContent = "x = " + x.toFixed(4) + "   y = " + y.toFixed(4) + " · 左键拖拽平移 · 滚轮缩放";
