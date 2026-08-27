@@ -77,9 +77,9 @@ body {
   position: absolute;
   left: 8px;
   top: 8px;
-  bottom: 8px;
-  width: 250px;
-  background: rgba(255,255,255,.94);
+  width: 280px;
+  max-height: calc(100% - 16px);
+  background: rgba(255,255,255,.95);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(0,0,0,.12);
@@ -92,7 +92,7 @@ body {
   transition: transform .18s ease, opacity .18s ease;
 }
 .expr-list:not(.visible) {
-  transform: translateX(-110%);
+  transform: translateX(-115%);
   opacity: 0;
   pointer-events: none;
 }
@@ -104,16 +104,36 @@ body {
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 5px 8px;
   font-size: 13px;
 }
+.expr-item.item-off { opacity: .45; }
 .expr-item .swatch {
   width: 12px; height: 12px;
   border-radius: 50%;
   flex-shrink: 0;
   border: 1px solid rgba(0,0,0,.2);
 }
-.expr-item .formula { flex: 1; font-family: "Consolas", monospace; overflow-wrap: anywhere; }
+.expr-item .formula {
+  flex: 1;
+  font-family: "Consolas", monospace;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 2px;
+  min-height: 17px;
+}
+.expr-item .formula:hover { background: #eef3ff; }
+.expr-item .inline-edit {
+  flex: 1;
+  font-family: "Consolas", monospace;
+  font-size: 13px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 2px 4px;
+  outline: none;
+  min-width: 0;
+}
 .expr-item .item-type {
   font-size: 11px;
   color: #666;
@@ -129,7 +149,8 @@ body {
 .expr-item.item-error .formula { color: #b91c1c; }
 .expr-item .remove {
   border: none; background: none; cursor: pointer;
-  color: #999; font-size: 16px;
+  color: #999; font-size: 14px;
+  padding: 0 2px;
 }
 .expr-item .remove:hover { color: #e11d48; }
 
@@ -156,6 +177,25 @@ body {
   margin-right: 5px;
   vertical-align: middle;
 }
+
+/* 错误横幅 (固定在顶部中间, 不被悬停提示覆盖) */
+.error-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 70%;
+  background: #b91c1c;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.3);
+  z-index: 30;
+  text-align: center;
+  pointer-events: none;
+}
+.error-banner.hidden { display: none; }
 
 .app-footer {
   padding: 6px 12px;

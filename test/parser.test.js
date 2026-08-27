@@ -113,5 +113,75 @@ T("奇异矩阵报错", () => {
   if (!err) throw new Error("本应报错");
 });
 
+console.log("--- 下标名称与归一化 ---");
+T("下标名 g_1(x)=x^2", () => {
+  const it = P.parseGraphItem("g_1(x)=x^2");
+  if (it.type !== "definition" || it.name !== "g_1") throw new Error("解析错误: " + JSON.stringify({ type: it.type, name: it.name }));
+});
+T("下标 Unicode g₂(x)=x²", () => {
+  const it = P.parseGraphItem("g\u2082(x)=x\u00b2");
+  if (it.name !== "g_2") throw new Error("名称应为 g_2: " + it.name);
+  reg.g_2 = { fn: it.fn };
+  eq(it.fn(3), 9, "g_2(3)");
+});
+T("全角输入 ｇ１（ｘ）＝ｘ＾２", () => {
+  const it = P.parseGraphItem("\uff47\uff11\uff08\uff58\uff09\uff1d\uff58\uff3e\uff12");
+  if (it.type !== "definition" || it.name !== "g1") throw new Error("解析错误: " + it.type + "/" + it.name);
+});
+T("仿射 2g1(x) 下标函数", () => {
+  const it = P.parseGraphItem("2g1(x)");
+  if (it.type !== "affine" || it.name !== "g1") throw new Error("解析错误: " + it.type + "/" + it.name);
+  reg.g1 = { fn: P.compileAst(P.parseMath("x^2")) };
+  const c = P.compileItem(it, reg);
+  eq(c.draw(3, reg), 18, "2*g1(3)");
+});
+T("仿射 f₁(x) (Unicode 下标)", () => {
+  const it = P.parseGraphItem("f\u2081(x)");
+  if (it.type !== "affine" || it.name !== "f_1") throw new Error("解析错误: " + it.type + "/" + it.name);
+});
+
+console.log("--- 矩阵定义与别名 ---");
+T("矩阵定义 A=M(0 1; 1 2)", () => {
+  const it = P.parseGraphItem("A=M(0 1; 1 2)");
+  if (it.type !== "matrixdef" || it.name !== "A") throw new Error("解析错误: " + it.type + "/" + it.name);
+  reg.A = { matrix: it.matrix };
+});
+T("矩阵别名 A f(x)", () => {
+  const ctx = { isMatrix: (n) => n === "A" };
+  const it = P.parseGraphItem("A f(x)", ctx);
+  if (it.type !== "parametric" || it.matrixRef !== "A") throw new Error("解析错误: " + it.type + "/" + it.matrixRef);
+  const c = P.compileItem(it, reg);
+  const [X, Y] = c.evalCurve(2, reg);
+  eq(X, 4, "X=1*f(2)=4");
+  eq(Y, 10, "Y=t+2*f(t)=2+8");
+});
+T("矩阵别名 A f", () => {
+  const ctx = { isMatrix: (n) => n === "A" };
+  const it = P.parseGraphItem("A f", ctx);
+  const c = P.compileItem(it, reg);
+  const [X, Y] = c.evalCurve(2, reg);
+  eq(X, 4, "X");
+  eq(Y, 10, "Y");
+});
+T("矩阵别名 A 2f", () => {
+  const ctx = { isMatrix: (n) => n === "A" };
+  const c = P.compileItem(P.parseGraphItem("A 2f", ctx), reg);
+  const [X, Y] = c.evalCurve(2, reg);
+  eq(X, 8, "X=2*f(2)");
+  eq(Y, 18, "Y=t+2*2*f(t)");
+});
+T("矩阵重定义(负分量/逗号分隔)", () => {
+  const it = P.parseGraphItem("A=M(0,-1,1,0)");
+  const c = P.compileItem(it, reg);
+  eq(c.matrix.a, 0, "a");
+  eq(c.matrix.b, -1, "b");
+});
+T("矩阵未定义时报错", () => {
+  const c = P.compileItem(P.parseGraphItem("A f(x)", { isMatrix: () => false }), {});
+  let err = null;
+  try { c.evalCurve(1, {}); } catch (e) { err = e; }
+  if (!err) throw new Error("本应报错");
+});
+
 console.log(failed ? "\n" + failed + " 个测试失败" : "\n全部通过");
 process.exit(failed ? 1 : 0);

@@ -222,37 +222,65 @@
       ctx.stroke();
     }
 
-    // 参数曲线 [X(t), Y(t)]
+    // 参数曲线 [X(t), Y(t)]: 自适应细分采样(按屏幕误差细分, 消除锯齿/破折)
     drawParametric(ctx, curve, w, h) {
       const v = this.view;
       const reg = this.registry;
-      const N = Math.max(512, Math.ceil(w * 1.5));
-      const span = Math.max(v.x1 - v.x0, v.y1 - v.y0) * 1.5;
+      const evalP = (t) => {
+        let p;
+        try { p = curve.evalCurve(t, reg); } catch (e) { p = null; }
+        if (!p || !isFinite(p[0]) || !isFinite(p[1])) return null;
+        return p;
+      };
+      const toScreen = (p) => this.toScreen(p[0], p[1]);
+
+      const SEG = Math.max(64, Math.ceil(w / 8));
+      const t0 = v.x0, t1 = v.x0 + (v.x1 - v.x0) * 1.5;
+      const dt = (t1 - t0) / SEG;
+      const steps = [];
+      for (let i = 0; i <= SEG; i++) steps.push(evalP(t0 + i * dt));
+
       ctx.strokeStyle = curve.color;
       ctx.lineWidth = (curve.width || 2);
       ctx.beginPath();
       let started = false;
       let prev = null;
-      let prevDx = 0, prevDy = 0;
-      for (let i = 0; i <= N; i++) {
-        const t = v.x0 + (v.x1 - v.x0) * (i / N) * 1.5;
-        let p;
-        try { p = curve.evalCurve(t, reg); } catch (e) { p = null; }
-        if (!p || !isFinite(p[0]) || !isFinite(p[1])) { started = false; prev = null; continue; }
-        // 跳到远处视为断开
-        const far = Math.abs(p[0] - v.x0) > span * 2 || Math.abs(p[1] - v.y0) > span * 2
-          || Math.abs(p[0] - v.x1) > span * 2 || Math.abs(p[1] - v.y1) > span * 2;
-        if (far) { started = false; prev = null; continue; }
-        const [sx, sy] = this.toScreen(p[0], p[1]);
+
+      const plotPt = (p) => {
+        const [sx, sy] = toScreen(p);
         if (started && prev) {
-          // 屏幕上大跳跃视作断开
-          const gap = Math.hypot(sx - prev[0], sy - prev[1]);
-          if (gap > w * 0.5) { started = false; }
+          if (Math.hypot(sx - prev[0], sy - prev[1]) > w * 0.5) started = false;
         }
         if (started) ctx.lineTo(sx, sy);
         else { ctx.moveTo(sx, sy); started = true; }
         if (curve.screenPts) curve.screenPts.push([sx, sy, p[0], p[1]]);
         prev = [sx, sy];
+      };
+
+      for (let i = 0; i < SEG; i++) {
+        const pA = steps[i], pB = steps[i + 1];
+        if (!pA || !pB) { started = false; prev = null; continue; }
+        if (prev) started = true; // 段间连接
+        plotPt(pA);
+        // 自适应细分: 中点与弦的屏幕偏差 > 0.7px 则继续细分
+        (function refine(tA, tB, k) {
+          const tm = (tA + tB) / 2;
+          const pm = evalP(tm);
+          if (!pm) return;
+          const [ax, ay] = toScreen(pA);
+          const [bx, by] = toScreen(pB);
+          const [mx, my] = toScreen(pm);
+          const len = Math.hypot(bx - ax, by - ay) || 1;
+          const dev = Math.abs((bx - ax) * (ay - my) - (ax - mx) * (by - ay)) / len;
+          if (dev > 0.7 && k < 10) {
+            refine(tA, tm, k + 1);
+            plotPt(pm);
+            refine(tm, tB, k + 1);
+          } else {
+            plotPt(pm);
+          }
+        })(t0 + i * dt, t0 + (i + 1) * dt, 0);
+        plotPt(pB);
       }
       ctx.stroke();
     }
