@@ -228,5 +228,56 @@ T("用户函数递归保护", () => {
   if (!err || !/递归/.test(err.message)) throw new Error("本应递归报错");
 });
 
+console.log("--- 无空格矩阵链与定义内矩阵 ---");
+T("紧贴写法 Af(x)", () => {
+  const it = P.parseGraphItem("Af(x)", ctxA);
+  if (it.type !== "parametric" || it.mats.length !== 1 || it.mats[0].ref !== "A") {
+    throw new Error("解析错误: " + it.type + "/" + JSON.stringify(it.mats));
+  }
+  const c = P.compileItem(it, reg);
+  eq(c.evalCurve(2, reg)[0], 4, "X");
+  eq(c.evalCurve(2, reg)[1], 10, "Y");
+});
+T("紧贴双链 AAf(x)", () => {
+  const c = P.compileItem(P.parseGraphItem("AAf(x)", ctxA), reg);
+  eq(c.evalCurve(2, reg)[0], 10, "X");
+  eq(c.evalCurve(2, reg)[1], 24, "Y");
+});
+T("紧贴字面量 M(0 1; 1 2)f(x)", () => {
+  const c = P.compileItem(P.parseGraphItem("M(0 1; 1 2)f(x)"), reg);
+  eq(c.evalCurve(2, reg)[0], 4, "X");
+  eq(c.evalCurve(2, reg)[1], 10, "Y");
+});
+T("定义中施加矩阵 g(x)=A f(x+2)", () => {
+  const it = P.parseGraphItem("g(x)=A f(x+2)", ctxA);
+  if (it.type !== "curvedef" || it.name !== "g") throw new Error("解析错误: " + it.type);
+  const c = P.compileItem(it, reg);
+  // t=2: f(4)=16, A·(2,16) = [16,34]
+  eq(c.evalCurve(2, reg)[0], 16, "X");
+  eq(c.evalCurve(2, reg)[1], 34, "Y");
+});
+T("定义中紧贴 g(x)=Af(x)", () => {
+  const it = P.parseGraphItem("g(x)=Af(x)", ctxA);
+  if (it.type !== "curvedef") throw new Error("解析错误: " + it.type);
+  const c = P.compileItem(it, reg);
+  eq(c.evalCurve(2, reg)[0], 4, "X");
+  eq(c.evalCurve(2, reg)[1], 10, "Y");
+});
+T("曲线基座可被引用 (仿射基座链)", () => {
+  // g 注册为基座, 再用 A 应用: A g
+  const it = P.parseGraphItem("g(x)=A f(x+2)", ctxA);
+  const c = P.compileItem(it, reg);
+  reg.g = { basePoint: c.evalCurve };
+  const it2 = P.parseGraphItem("A g", ctxA);
+  const c2 = P.compileItem(it2, reg);
+  // t=2: g(2)=[16,34], A·(16,34) = [34,84]
+  eq(c2.evalCurve(2, reg)[0], 34, "X");
+  eq(c2.evalCurve(2, reg)[1], 84, "Y");
+});
+T("普通定义不受矩阵上下文影响", () => {
+  const it = P.parseGraphItem("h(x)=2x+1", ctxA);
+  if (it.type !== "definition") throw new Error("解析错误: " + it.type);
+});
+
 console.log(failed ? "\n" + failed + " 个测试失败" : "\n全部通过");
 process.exit(failed ? 1 : 0);

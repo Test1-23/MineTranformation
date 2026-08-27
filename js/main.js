@@ -42,7 +42,7 @@
       if (it.hidden) continue;
       if (it.compiled.kind === "plain" || it.compiled.kind === "affine") {
         curves.push({ kind: "function", color: it.color, draw: it.compiled.draw, item: it });
-      } else if (it.compiled.kind === "parametric") {
+      } else if (it.compiled.kind === "parametric" || it.compiled.kind === "curvedef") {
         curves.push({
           kind: "parametric",
           color: it.color,
@@ -63,18 +63,23 @@
     const compiled = P.compileItem(parsed, registry);
     return { id: idSeq++, text, parsed, compiled, color, error: null, hidden: false };
   }
-  function registerParsed(parsed) {
+  function registerParsed(parsed, compiled) {
     if (parsed.type === "definition") registry[parsed.name] = { fn: parsed.fn };
     else if (parsed.type === "matrixdef") {
       if (parsed.matrixFn) registry[parsed.name] = { matrixFn: parsed.matrixFn };
       else registry[parsed.name] = { matrix: parsed.matrix };
+    } else if (parsed.type === "curvedef") {
+      // 曲线基座: 供其他变换引用 (g(x)=A f(x+2) 后的 2g(x))
+      registry[parsed.name] = { basePoint: compiled.basePoint };
     }
   }
-  function unregisterParsed(parsed) {
+  function unregisterParsed(parsed, compiled) {
     if (parsed.type === "definition") {
       if (registry[parsed.name] && registry[parsed.name].fn === parsed.fn) delete registry[parsed.name];
     } else if (parsed.type === "matrixdef") {
       if (registry[parsed.name] && (registry[parsed.name].matrixFn === parsed.matrixFn || registry[parsed.name].matrix === parsed.matrix)) delete registry[parsed.name];
+    } else if (parsed.type === "curvedef") {
+      if (registry[parsed.name] && registry[parsed.name].basePoint === compiled.basePoint) delete registry[parsed.name];
     }
   }
 
@@ -84,7 +89,7 @@
     let it;
     try {
       it = makeItem(text, colorHint || PALETTE[items.length % PALETTE.length]);
-      registerParsed(it.parsed);
+      registerParsed(it.parsed, it.compiled);
     } catch (e) {
       showError(e.message);
       return;
@@ -99,7 +104,7 @@
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) return;
     const it = items[idx];
-    unregisterParsed(it.parsed);
+    unregisterParsed(it.parsed, it.compiled);
     items.splice(idx, 1);
     rebuild();
   }
@@ -116,8 +121,8 @@
       renderList();
       return;
     }
-    unregisterParsed(it.parsed);
-    registerParsed(fresh.parsed);
+    unregisterParsed(it.parsed, it.compiled);
+    registerParsed(fresh.parsed, fresh.compiled);
     Object.assign(it, { text: fresh.text, parsed: fresh.parsed, compiled: fresh.compiled });
     rebuild();
   }

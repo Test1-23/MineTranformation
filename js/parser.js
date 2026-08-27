@@ -312,7 +312,7 @@
       }
       if (t.type === "id") {
         tok();
-        // 粘连矩阵名: AA -> A*A (拆成序列, 依次相乘)
+        // 纯矩阵名粘连: AA/AB -> 矩阵乘积 (最后一个也必须是矩阵名)
         const run = splitMatrixRun(t.value, { isMatrix: ctxOfParser });
         if (run) {
           let node = { type: "mname", name: run[0] };
@@ -375,25 +375,39 @@
   // 纯函数: x^2 / sin(x)/x / 2x
 
   // 判断表达式是否引用矩阵 (用于识别矩阵定义 B=AA / B=A*A / A+M(..))
-  // 处理粘连写法: AA = A*A (通过 splitMatrixRun 拆分)
+  // 对函数调用 id( 宽容处理, 以便 g(x)=A f(x+2) 走 curvedef 分支
   function looksLikeMatrixExpr(expr, ctx) {
     const tokens = lex(expr);
     let sawM = false;
+    let depth = 0;
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i];
       if (t.type === "eof") break;
-      if (t.type === "id" && t.value === "M" && tokens[i + 1] && tokens[i + 1].type === "lp") { sawM = true; continue; }
+      if (t.type === "lp") { depth++; continue; }
+      if (t.type === "rp") { depth--; continue; }
+      if (t.type === "id" && t.value === "M" && tokens[i + 1] && tokens[i + 1].type === "lp") {
+        sawM = true;
+        continue;
+      }
       if (t.type === "id" && t.value !== "M") {
-        if (t.value === "x") return false;
+        // 括号内 (如 f(x+2) 里的 x) 不参与判定
+        if (t.value === "x" && depth === 0) return false;
         if (ctx.isMatrix && ctx.isMatrix(t.value)) { sawM = true; continue; }
         if (splitMatrixRun(t.value, ctx)) { sawM = true; continue; }
-        return false;
+        // 矩阵名紧贴函数调用: Af(x) / AAf(x) -> 拆出矩阵前缀 + 函数调用
+        const next = tokens[i + 1];
+        if (depth === 0 && next && next.type === "lp" && splitMatrixPrefix(t.value, ctx)) {
+          sawM = true;
+          continue;
+        }
+        if (depth === 0) continue;
       }
     }
     return sawM;
   }
 
   // 将粘连 id 拆成已知矩阵名序列: "AA" -> ["A","A"], 失败返回 null
+  // 注意: 只拆 "纯矩阵名" 粘连连写 (AA/AB/AAA); "Af" 中 f 不是矩阵则整体返回 null
   function splitMatrixRun(name, ctx) {
     const names = [];
     let remain = name;
@@ -410,6 +424,24 @@
     return names.length > 1 ? names : null;
   }
 
+  // 判断 id 是否以矩阵名开头 (可重复) 且剩尾为函数名
+  // "Af" -> true (A 是矩阵, f 是剩余名称), "AAB" -> true (AA 后剩 B)
+  function splitMatrixPrefix(name, ctx) {
+    let remain = name;
+    let seen = false;
+    while (remain.length) {
+      let matched = null;
+      for (let len = remain.length; len >= 1; len--) {
+        const head = remain.slice(0, len);
+        if (ctx.isMatrix && ctx.isMatrix(head)) { matched = head; break; }
+      }
+      if (!matched) break;
+      seen = true;
+      remain = remain.slice(matched.length);
+    }
+    return seen && remain.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(remain);
+  }
+
   function parseGraphItem(src, ctx) {
     ctx = ctx || {};
     const s = normalize(src);
@@ -423,46 +455,119 @@
       const name = defMatch[1];
       if (badName(name)) throw new Error("不能使用保留名 '" + name + "'");
       const expr = defMatch[2].trim();
-      // 矩阵表达式定义: 内含 M( 或引用已定义矩阵
+      // 矩阵表达式定义: 内含 M( 或引用已定义矩阵 (B=AA)
       if (looksLikeMatrixExpr(expr, ctx)) {
-        const node = parseMatrixExpr(lex(expr), { isMatrix: ctx.isMatrix });
-        return { type: "matrixdef", name, matrixFn: compileMatrixExpr(node), matrix: null, source: src };
+        let node = null;
+        try {
+          node = parseMatrixExpr(lex(expr), { isMatrix: ctx.isMatrix });
+        } catch (e) { node = null; }
+        if (node) {
+          return { type: "matrixdef", name, matrixFn: compileMatrixExpr(node), matrix: null, source: src };
+        }
+        // 定义中施加矩阵: g(x)=A f(x+2) 或 g(x)=Af(x) 或 g(x)=M(0 1;1 2) f(x)
+        const dchain = parseMatrixChain(expr, ctx);
+        if (dchain) {
+          return {
+            type: "curvedef",
+            name,
+            mats: dchain.mats,
+            base: dchain.base,
+            source: src
+          };
+        }
+        throw new Error("定义含矩阵引用但解析失败: " + expr);
       }
       const node = parseMath(expr);
       return { type: "definition", name, fn: compileAst(node), source: src };
     }
 
     // ---- 矩阵链应用: M(...) | 已定义矩阵名, 依次作用于 base ----
+    // 支持紧贴写法: Af(x) = A f(x), AAf(x) = A A f(x), M(0 1; 1 2)f(x)
+    const chain = parseMatrixChain(s, ctx);
+    if (chain) {
+      return { type: "parametric", mats: chain.mats, base: chain.base, source: src };
+    }
+
+    return parseCurvePart(s);
+  }
+
+  // 解析矩阵链头: 返回 { mats, base } 或 null
+  // 支持格式:
+  //   A f(x) / M(0 1; 1 2) 2f(x)  (空格或紧跟均可)
+  //   Af(x) / AAf(x)  (矩阵名与函数名紧贴)
+  //   A f  (隐式 base=f)
+  function parseMatrixChain(s, ctx) {
     const mats = [];
     let rest = s.trim();
-    while (true) {
+    for (;;) {
       const t0 = /^\s*M\s*\(\s*([^)]*)\)/.exec(rest);
       if (t0) {
         mats.push({ lit: parseMatrixLiteral(t0[1]) });
         rest = rest.slice(t0[0].length);
         continue;
       }
+      // 分隔: 矩阵名 + 空白 + 后续
       const t1 = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$/.exec(rest);
       if (t1 && ctx.isMatrix && ctx.isMatrix(t1[1])) {
         mats.push({ ref: t1[1] });
         rest = t1[2];
         continue;
       }
+      // 紧贴: 矩阵名接函数名/矩阵名 (Af, AAf, AAAA或函数名在末尾)
+      if (ctx.isMatrix) {
+        const glued = parseGluedMatrixHead(rest, ctx);
+        if (glued) {
+          for (const g of glued.mats) mats.push(g);
+          rest = glued.rest;
+          continue;
+        }
+      }
       break;
     }
-    if (mats.length) {
-      let base;
-      if (!rest.trim()) {
-        base = { type: "implicit", name: "f" };
-      } else if (/^\s*[A-Za-z_][A-Za-z0-9_]*\s*$/.test(rest)) {
-        base = { type: "implicit", name: rest.trim() };
-      } else {
-        base = parseCurvePart(rest);
-      }
-      return { type: "parametric", mats, base, source: src };
+    if (!mats.length) return null;
+    let base;
+    const r = rest.trim();
+    if (!r) {
+      base = { type: "implicit", name: "f" };
+    } else if (/^\s*[A-Za-z_][A-Za-z0-9_]*\s*$/.test(r)) {
+      base = { type: "implicit", name: r };
+    } else {
+      base = parseCurvePart(r);
     }
+    return { mats, base };
+  }
 
-    return parseCurvePart(s);
+  // 紧贴矩阵头: 从串首把可由多个已定矩阵名拼成的序列 + 剩余尾部切出
+  // "Af(x)" -> mats=[ref A], rest="f(x)"
+  // "AAf(x)" -> mats=[A,A], rest="f(x)"
+  // "A f" 不会到这里 (空格由上层处理)
+  function parseGluedMatrixHead(s, ctx) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)(.*)$/.exec(s);
+    if (!m) return null;
+    const name = m[1];
+    const tail = m[2];
+    // 尝试整名 = 矩阵: A f(x) 中 "A" 是矩阵但后续有 space? 已被 t1 处理, 这里只处理无空格
+    // 贪心拆: 找出能全部由矩阵名组成的最大前缀 (每位乘)
+    let mats = [];
+    let remain = name;
+    for (;;) {
+      let matched = null;
+      for (let len = Math.min(remain.length, 3); len >= 1; len--) {
+        // 只允许 1-3 字符矩阵名 (常见单字母), 兼容 AA/AB
+        const head = remain.slice(0, len);
+        if (ctx.isMatrix(head)) { matched = head; break; }
+      }
+      if (!matched) break;
+      mats.push({ ref: matched });
+      remain = remain.slice(matched.length);
+    }
+    if (!mats.length) return null;
+    const gluedRest = (remain + tail).trim();
+    if (!gluedRest) {
+      // 全部是矩阵名: 不能用于链 (如 "AA" 单独) - 返回 null, 让上层按矩阵表达式处理
+      return null;
+    }
+    return { mats, rest: gluedRest };
   }
 
   function parseCurvePart(src) {
@@ -539,113 +644,131 @@
         kind: "affine",
         source: item.source,
         draw(x, reg) {
+          reg = reg || {};
           const def = reg[item.name];
           if (!def) throw new Error("函数 " + item.name + " 未定义, 请先输入 " + item.name + "(x)=...");
           let arg = x;
-          if (item.inner) arg = item.inner(x);
-          let y = def.fn(arg);
+          if (item.inner) arg = item.inner(x, reg);
+          let y = def.fn(arg, reg);
           if (item.scale !== null) y *= item.scale;
           return y + item.offset;
         }
       };
     }
+    if (item.type === "curvedef") {
+      // 定义中施加矩阵: 生成参数曲线对象 + 可被引用的基座函数
+      const param = makeParametricItem(item.name, item.mats, item.base);
+      return {
+        kind: "curvedef",
+        source: item.source,
+        name: item.name,
+        evalCurve: param.evalCurve,
+        tRange: (view, reg) => param.tRange(view, reg),
+        // g(x) 作为基座: 返回 (x, y) 点
+        basePoint: param.evalCurve
+      };
+    }
     if (item.type === "parametric") {
-      const base = item.base;
-      const mats = item.mats; // [{lit} | {ref}], 从左到右
-      const matrixRef = item.matrixRef || null;
-      const matrix = item.matrix || null;
-      const baseEval = (t, reg) => {
-        if (base.type === "implicit") {
-          const def = reg[base.name];
-          if (!def || !def.fn) throw new Error("函数 " + base.name + " 未定义");
-          return def.fn(t, reg);
-        }
-        if (base.type === "plain") {
-          if (base.fn) return base.fn(t, reg);
-          if (base.y0x) return base.y0x(reg)(t);
-        }
-        if (base.type === "affine") {
-          const def = reg[base.name];
-          if (!def || !def.fn) throw new Error("函数 " + base.name + " 未定义");
-          let arg = t;
-          if (base.inner) arg = base.inner(t, reg);
-          let y = def.fn(arg, reg);
+      return makeParametricItem(null, item.mats, item.base);
+    }
+    throw new Error("未知图元类型");
+  }
+
+  // 构造参数曲线对象
+  // 基座支持函数 (implicit/plain/affine -> y=f(x)) 或曲线基座 ([X(t), Y(t)])
+  function makeParametricItem(kind, mats, base) {
+    const baseEval = (t, reg) => {
+      if (base.type === "implicit") {
+        const def = reg[base.name];
+        if (!def) throw new Error("函数 " + base.name + " 未定义");
+        if (def.fn) return def.fn(t, reg);
+        if (def.basePoint) return def.basePoint(t, reg);
+        throw new Error("函数 " + base.name + " 未定义");
+      }
+      if (base.type === "plain") {
+        if (base.fn) return base.fn(t, reg);
+        if (base.y0x) return base.y0x(reg)(t);
+      }
+      if (base.type === "affine") {
+        const def = reg[base.name];
+        if (!def) throw new Error("函数 " + base.name + " 未定义");
+        let arg = t;
+        if (base.inner) arg = base.inner(t, reg);
+        let y;
+        if (def.fn) {
+          y = def.fn(arg, reg);
           if (base.scale !== null) y *= base.scale;
           return y + base.offset;
         }
-        throw new Error("未知基准类型");
-      };
-      const resolveMatrix = (m, reg) => {
-        if (m.lit) return m.lit;
-        if (m.ref) {
-          const md = reg[m.ref];
-          if (!md) throw new Error("矩阵 " + m.ref + " 未定义");
-          if (md.matrixFn) return md.matrixFn(reg);
-          if (md.matrix) return md.matrix;
-          throw new Error("矩阵 " + m.ref + " 未定义");
+        if (def.basePoint) {
+          if (base.scale !== null || base.offset !== 0) throw new Error("曲线基座不支持 scale/offset");
+          return def.basePoint(arg, reg);
         }
-        throw new Error("未知矩阵引用");
-      };
-      // 合成矩阵 (最左为最外层): C = mats[0] * mats[1] * ... * mats[n]
-      const composite = (reg) => {
-        let C = null;
-        for (const m of mats) {
-          const M = resolveMatrix(m, reg);
-          C = C ? matMul(C, M) : M;
+        throw new Error("函数 " + base.name + " 未定义");
+      }
+      throw new Error("未知基准类型");
+    };
+    const resolveMatrix = (m, reg) => {
+      if (m.lit) return m.lit;
+      if (m.ref) {
+        const md = reg[m.ref];
+        if (!md) throw new Error("矩阵 " + m.ref + " 未定义");
+        if (md.matrixFn) return md.matrixFn(reg);
+        if (md.matrix) return md.matrix;
+        throw new Error("矩阵 " + m.ref + " 未定义");
+      }
+      throw new Error("未知矩阵引用");
+    };
+    // 合成矩阵 (最左为最外层): C = mats[0] * mats[1] * ... * mats[n]
+    const composite = (reg) => {
+      let C = null;
+      for (const m of mats) {
+        const M = resolveMatrix(m, reg);
+        C = C ? matMul(C, M) : M;
+      }
+      if (!C) return { a: 1, b: 0, c: 0, d: 1 };
+      return C;
+    };
+    return {
+      composite,
+      // 由当前视口 4 角经 M⁻¹ 反推出 t 的有效范围 (t = (d*x - b*y) / det)
+      tRange(view, reg) {
+        if (!mats || !mats.length) return [view.x0, view.x1];
+        let C;
+        try { C = composite(reg); } catch (e) { return [view.x0, view.x1]; }
+        const det = C.a * C.d - C.b * C.c;
+        if (Math.abs(det) < 1e-12) return [view.x0, view.x1];
+        const corners = [
+          [view.x0, view.y0], [view.x0, view.y1],
+          [view.x1, view.y0], [view.x1, view.y1]
+        ];
+        let tmin = Infinity, tmax = -Infinity;
+        for (const [x, y] of corners) {
+          const t = (C.d * x - C.b * y) / det;
+          if (t < tmin) tmin = t;
+          if (t > tmax) tmax = t;
         }
-        if (!C) return { a: 1, b: 0, c: 0, d: 1 };
-        return C;
-      };
-      return {
-        kind: "parametric",
-        source: item.source,
-        composite,
-        // 由当前视口 4 角经 M⁻¹ 反推出 t 的有效范围 (t = (d*x - b*y) / det)
-        tRange(view, reg) {
-          let C;
-          try { C = composite(reg); } catch (e) { return [view.x0, view.x1]; }
-          const det = C.a * C.d - C.b * C.c;
-          if (Math.abs(det) < 1e-12) return [view.x0, view.x1];
-          const corners = [
-            [view.x0, view.y0], [view.x0, view.y1],
-            [view.x1, view.y0], [view.x1, view.y1]
-          ];
-          let tmin = Infinity, tmax = -Infinity;
-          for (const [x, y] of corners) {
-            const t = (C.d * x - C.b * y) / det;
-            if (t < tmin) tmin = t;
-            if (t > tmax) tmax = t;
-          }
-          const pad = (Math.abs(tmin) + Math.abs(tmax)) * 0.05 + 1;
-          tmin = Math.max(-1e9, Math.min(tmin - pad, 0));
-          tmax = Math.min(1e9, Math.max(tmax + pad, 0));
-          return [tmin, tmax];
-        },
-        evalCurve(t, reg) {
-          reg = reg || {};
-          const y = baseEval(t, reg);
-          let px = t, py = y;
-          if (mats) {
-            // 从左到右为最外层矩阵: "A B f" = A(B(f)); 求值时从内向外
-            for (let i = mats.length - 1; i >= 0; i--) {
-              const M = resolveMatrix(mats[i], reg);
-              const nx = M.a * px + M.b * py;
-              const ny = M.c * px + M.d * py;
-              px = nx; py = ny;
-            }
-          } else {
-            // 旧式单矩阵
-            let M = matrix;
-            if (matrixRef) M = resolveMatrix({ ref: matrixRef }, reg);
+        const pad = (Math.abs(tmin) + Math.abs(tmax)) * 0.05 + 1;
+        tmin = Math.max(-1e9, Math.min(tmin - pad, 0));
+        tmax = Math.min(1e9, Math.max(tmax + pad, 0));
+        return [tmin, tmax];
+      },
+      evalCurve(t, reg) {
+        reg = reg || {};
+        const y = baseEval(t, reg);
+        let px = t, py = y;
+        if (mats) {
+          // 从左到右为最外层矩阵: "A B f" = A(B(f)); 求值时从内向外
+          for (let i = mats.length - 1; i >= 0; i--) {
+            const M = resolveMatrix(mats[i], reg);
             const nx = M.a * px + M.b * py;
             const ny = M.c * px + M.d * py;
             px = nx; py = ny;
           }
-          return [px, py];
         }
-      };
-    }
-    throw new Error("未知图元类型");
+        return [px, py];
+      }
+    };
   }
 
   const api = {
