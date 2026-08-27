@@ -17,9 +17,14 @@ MineTransformation
 ----
 纯 HTML/CSS/JS, 无构建依赖。
 
-    浏览器直接打开 index.html
-    node test/parser.test.js   # 表达式解析器测试
-    node test/smoke.test.js    # 绘图集成冒烟测试
+    python serve.py              # 本地开发服务器, 入口 http://127.0.0.1:19696
+    python serve.py 8000         # 指定其他端口
+    node test/parser.test.js     # 表达式解析器测试
+    node test/smoke.test.js      # 绘图集成冒烟测试
+
+许可
+----
+MIT License, 详见 [LICENSE](LICENSE)。
 
 目录
 ----
@@ -28,6 +33,8 @@ MineTransformation
     js/parser.js      词法/语法/图元解析与编译
     js/plotter.js     Canvas 绘图(网格/坐标轴/曲线/视口)
     js/main.js        交互与 UI 逻辑
+    serve.py          本地开发服务器 (默认端口 19696)
+    LICENSE           MIT License
     test/             测试
 
 矩阵说明
