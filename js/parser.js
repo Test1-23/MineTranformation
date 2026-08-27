@@ -255,11 +255,11 @@
   // 矩阵表达式解析: 词法在 lex 基础上完成
   // 支持: M(..) 字面量 | 已定义矩阵名 | + - 运算 | 常见结合
   // 语法: M(0 1; 1 2)*A+2M(1 0; 0 1) 等
-  function parseMatrixExpr(tokens) {
+  function parseMatrixExpr(tokens, opts) {
+    const ctxOfParser = (opts && opts.isMatrix) || (() => false);
     let pos = 0;
     const peek = () => tokens[pos];
     const tok = () => tokens[pos++];
-
     function expr() {
       let node = term();
       while (peek().type === "op" && (peek().value === "+" || peek().value === "-")) {
@@ -312,6 +312,15 @@
       }
       if (t.type === "id") {
         tok();
+        // 粘连矩阵名: AA -> A*A (拆成序列, 依次相乘)
+        const run = splitMatrixRun(t.value, { isMatrix: ctxOfParser });
+        if (run) {
+          let node = { type: "mname", name: run[0] };
+          for (let i = 1; i < run.length; i++) {
+            node = { type: "mbin", op: "*", left: node, right: { type: "mname", name: run[i] } };
+          }
+          return node;
+        }
         return { type: "mname", name: t.value };
       }
       if (t.type === "lp") {
@@ -365,7 +374,8 @@
   // 矩阵链: A B f(x) / M(..) A f(x)     从左到右依次为最外层矩阵
   // 纯函数: x^2 / sin(x)/x / 2x
 
-  // 判断表达式是否引用矩阵 (用于识别矩阵定义 B=AA)
+  // 判断表达式是否引用矩阵 (用于识别矩阵定义 B=AA / B=A*A / A+M(..))
+  // 处理粘连写法: AA = A*A (通过 splitMatrixRun 拆分)
   function looksLikeMatrixExpr(expr, ctx) {
     const tokens = lex(expr);
     let sawM = false;
@@ -373,16 +383,31 @@
       const t = tokens[i];
       if (t.type === "eof") break;
       if (t.type === "id" && t.value === "M" && tokens[i + 1] && tokens[i + 1].type === "lp") { sawM = true; continue; }
-      if (t.type === "id" && ctx.isMatrix && ctx.isMatrix(t.value)) { sawM = true; continue; }
-      if (t.type === "id" && t.value !== "M" && !(FUNCTIONS[t.value] !== undefined || CONSTANTS[t.value] !== undefined)) {
-        // 非矩阵非内置引用: 需要该名字已定义
-        // B=AA 中 A 是矩阵; 函数名 x 直接排除
+      if (t.type === "id" && t.value !== "M") {
         if (t.value === "x") return false;
         if (ctx.isMatrix && ctx.isMatrix(t.value)) { sawM = true; continue; }
-        if (ctx.isMatrix && !ctx.isMatrix(t.value)) return false;
+        if (splitMatrixRun(t.value, ctx)) { sawM = true; continue; }
+        return false;
       }
     }
     return sawM;
+  }
+
+  // 将粘连 id 拆成已知矩阵名序列: "AA" -> ["A","A"], 失败返回 null
+  function splitMatrixRun(name, ctx) {
+    const names = [];
+    let remain = name;
+    while (remain.length) {
+      let matched = null;
+      for (let len = remain.length; len >= 1; len--) {
+        const head = remain.slice(0, len);
+        if (ctx.isMatrix && ctx.isMatrix(head)) { matched = head; break; }
+      }
+      if (!matched) return null;
+      names.push(matched);
+      remain = remain.slice(matched.length);
+    }
+    return names.length > 1 ? names : null;
   }
 
   function parseGraphItem(src, ctx) {
@@ -400,7 +425,7 @@
       const expr = defMatch[2].trim();
       // 矩阵表达式定义: 内含 M( 或引用已定义矩阵
       if (looksLikeMatrixExpr(expr, ctx)) {
-        const node = parseMatrixExpr(lex(expr));
+        const node = parseMatrixExpr(lex(expr), { isMatrix: ctx.isMatrix });
         return { type: "matrixdef", name, matrixFn: compileMatrixExpr(node), matrix: null, source: src };
       }
       const node = parseMath(expr);

@@ -208,6 +208,19 @@ T("矩阵乘法定义 B=A*A", () => {
   const B = it.matrixFn({ A: { matrix: { a: 0, b: 1, c: 1, d: 2 } } });
   eq(B.a, 1); eq(B.b, 2); eq(B.c, 2); eq(B.d, 5);
 });
+T("粘连写法 C=AA (矩阵平方)", () => {
+  const it = P.parseGraphItem("C=AA", ctxA);
+  if (it.type !== "matrixdef") throw new Error("解析错误: " + it.type);
+  const C = it.matrixFn({ A: { matrix: { a: 0, b: 1, c: 1, d: 2 } } });
+  eq(C.a, 1); eq(C.b, 2); eq(C.c, 2); eq(C.d, 5);
+});
+T("粘连写法 D=AB (矩阵乘积)", () => {
+  const ctxAB = { isMatrix: (n) => n === "A" || n === "B" };
+  const it = P.parseGraphItem("D=AB", ctxAB);
+  if (it.type !== "matrixdef") throw new Error("解析错误: " + it.type);
+  const D = it.matrixFn({ A: { matrix: { a: 0, b: 1, c: 1, d: 2 } }, B: { matrix: { a: 1, b: 0, c: 0, d: 2 } } });
+  eq(D.a, 0); eq(D.b, 2); eq(D.c, 1); eq(D.d, 4);
+});
 T("用户函数递归保护", () => {
   const reg2 = { g: { fn: P.compileAst(P.parseMath("g(x)+1")) } };
   let err = null;
