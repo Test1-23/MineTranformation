@@ -94,6 +94,19 @@ body {
   border: 1px solid rgba(0,0,0,.2);
 }
 .expr-item .formula { flex: 1; font-family: "Consolas", monospace; overflow-wrap: anywhere; }
+.expr-item .item-type {
+  font-size: 11px;
+  color: #666;
+  background: #eee;
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+.expr-item.item-error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+.expr-item.item-error .formula { color: #b91c1c; }
 .expr-item .remove {
   border: none; background: none; cursor: pointer;
   color: #999; font-size: 16px;
