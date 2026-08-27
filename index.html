@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MineTransformation - 函数画板</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-title">MineTransformation</div>
+    <input id="expr-input" class="expr-input" type="text"
+      placeholder="输入表达式，如 f(x)=x^2 或 2f(x)" autocomplete="off" spellcheck="false" />
+    <button id="btn-add" class="btn btn-primary">添加</button>
+    <button id="btn-zoom-in" class="btn" title="放大">+</button>
+    <button id="btn-zoom-out" class="btn" title="缩小">−</button>
+    <button id="btn-reset" class="btn" title="重置视图">⟳</button>
+    <button id="btn-help" class="btn" title="帮助">?</button>
+  </header>
+  <main class="app-main">
+    <canvas id="plot-canvas"></canvas>
+    <aside id="expr-list" class="expr-list"></aside>
+  </main>
+  <footer class="app-footer" id="status-bar">
+    左键拖拽平移 · 滚轮缩放 · 输入 f(x)=x^2 定义函数，2f(x)、f(2x)、M(0 1 1 2) 施加变换
+  </footer>
+  <div id="help-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>帮助</h2>
+      <ul>
+        <li>定义函数：<code>f(x)=x^2</code> 或 <code>f = x^2</code></li>
+        <li>函数变换：<code>2f(x)</code>（纵伸缩）、<code>f(2x)</code>（横伸缩）、<code>f(x)+3</code>（平移）</li>
+        <li>矩阵变换：<code>M(0 1; 1 2)</code> 作用于 (x, f(x))</li>
+        <li>支持运算：+ − * / ^ sqrt sin cos tan log abs 等</li>
+      </ul>
+      <button id="btn-close-help" class="btn btn-primary">关闭</button>
+    </div>
+  </div>
+  <script src="js/parser.js"></script>
+  <script src="js/plotter.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
