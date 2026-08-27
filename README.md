@@ -16,6 +16,7 @@ MineTransformation
 * 数学运算: `+ - * / ^` 括号、隐式乘法(`2x`, `2(x+1)`, `(x+1)(x-1)`)、右结合幂 `2^3^2`
 * 函数: `sin cos tan asin acos atan sinh cosh tanh sqrt cbrt abs ln log log2 exp floor ceil round sign`
 * 常量: `pi` `e` `tau`; 全角字符/×÷−/上标自动归一化
+* 常用记法: 隐式参数函数 `lnx`/`sinx`/`cos2x`/`sqrtx`（等价 `ln(x)` 等）、带底对数 `log2x`/`log_2(x)`/`log3x`、导数 `f'(x)`（用户函数数值导数）、`dy/dx`（隐式 f 的导数）
 * 交互: 左键拖拽平移 · 滚轮缩放 · 工具栏缩放/重置 · 浮动的表达式面板(☰ 按钮折叠) · 点击列表项内联编辑(Enter 确定, Esc 取消) · ●/◌ 隐藏显示 · × 删除 · 悬停曲线浮动显示坐标 · 错误横幅不遮挡
 
 开发
