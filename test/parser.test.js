@@ -279,5 +279,42 @@ T("普通定义不受矩阵上下文影响", () => {
   if (it.type !== "definition") throw new Error("解析错误: " + it.type);
 });
 
+console.log("--- 常用函数记法兼容 ---");
+T("lnx (隐式参数)", () => {
+  const fn = P.compileAst(P.parseMath("lnx"));
+  eq(fn(Math.E), 1, "ln(e)=1");
+});
+T("ln x / ln(2.72)", () => {
+  eq(P.compileAst(P.parseMath("ln x"))(5), Math.log(5), "ln x");
+  eq(P.compileAst(P.parseMath("ln(2.72)"))(0), Math.log(2.72), "ln(2.72)");
+});
+T("log2x / log_2(x) / log3x (底数记法)", () => {
+  eq(P.compileAst(P.parseMath("log2x"))(8), 3, "log2x");
+  eq(P.compileAst(P.parseMath("log_2(x)"))(8), 3, "log_2(x)");
+  eq(P.compileAst(P.parseMath("log3x"))(9), 2, "log3x");
+});
+T("sinx / cos2x / sqrtx / absx (隐式参数)", () => {
+  eq(P.compileAst(P.parseMath("sinx"))(1), Math.sin(1), "sinx");
+  eq(P.compileAst(P.parseMath("cos2x"))(1), Math.cos(2), "cos2x");
+  eq(P.compileAst(P.parseMath("sqrtx"))(9), 3, "sqrtx");
+  eq(P.compileAst(P.parseMath("absx"))(-6), 6, "absx");
+});
+T("导数 f'(x) 数值导数", () => {
+  const reg = { f: { fn: P.compileAst(P.parseMath("x^2")) } };
+  eq(P.compileAst(P.parseMath("f'(x)"))(3, reg), 6, "f'(3)=6");
+  eq(P.compileAst(P.parseMath("2f'(x)"))(3, reg), 12, "2f'(3)=12");
+  eq(P.compileAst(P.parseMath("f'(2)"))(0, reg), 4, "f'(2)=4");
+});
+T("dy/dx (隐式 f 的导数)", () => {
+  const reg = { f: { fn: P.compileAst(P.parseMath("x^2")) } };
+  const fn = P.compileAst(P.parseMath("dy/dx"));
+  eq(fn(3, reg), 6, "dy/dx=f'(3)");
+});
+T("无定义函数导数报错", () => {
+  let err = null;
+  try { P.compileAst(P.parseMath("g'(x)"))(1, {}); } catch (e) { err = e; }
+  if (!err) throw new Error("本应报错");
+});
+
 console.log(failed ? "\n" + failed + " 个测试失败" : "\n全部通过");
 process.exit(failed ? 1 : 0);

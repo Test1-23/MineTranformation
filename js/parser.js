@@ -61,6 +61,7 @@
       if (c === ")") { push("rp", c); i++; continue; }
       if (c === ",") { push("comma", c); i++; continue; }
       if (c === ";") { push("semi", c); i++; continue; }
+      if (c === "'") { push("prime", c); i++; continue; }
       if ("+-*/^".includes(c)) { push("op", c); i++; continue; }
       throw new Error("无法识别的字符: '" + c + "'");
     }
@@ -85,6 +86,30 @@
     exp: Math.exp, floor: Math.floor, ceil: Math.ceil,
     round: Math.round, sign: Math.sign
   };
+
+  // 拆解隐式-参数函数 id: "lnx" -> {fn:"ln", base:null, rest:"x"} (实参=余串)
+  //                   "log2x" -> {fn:"log", base:2, rest:"x"} (记底数2), "log10x" -> 底10
+  // 注意: 仅在实参整体粘在函数名后时走 rest (如 lnx/sinx/log2x); ln x 空格形式由 expr() 消费
+  function splitImplicitFnCall(name) {
+    const m1 = /^ln(.+)$/.exec(name);
+    if (m1) return { fn: "ln", base: null, rest: m1[1] };
+    // 任意底数: logNx -> log 以 N 为底 (N 为整数或小数/字母底)
+    const m2 = /^log([0-9.]+)(.+)$/.exec(name);
+    if (m2) return { fn: "log", base: parseFloat(m2[1]), rest: m2[2] };
+    // 变量/下标底: log_2 x / log_2(x) / log_a x / logₐx
+    const m3 = /^log_([A-Za-z_][A-Za-z0-9_]*|[0-9.]+)(.*)$/.exec(name);
+    if (m3) return { fn: "log", rest: m3[2] || "x", base: m3[1] };
+    // 常规内置函数紧跟实参: sinx, cos2x, sqrtx, absx
+    for (const fn of Object.keys(FUNCTIONS)) {
+      if (name.startsWith(fn) && name.length > fn.length) {
+        const rest = name.slice(fn.length);
+        if (/^[0-9A-Za-z_(]/.test(rest)) {
+          return { fn, base: null, rest };
+        }
+      }
+    }
+    return null;
+  }
 
   function parseMath(srcOrToks) {
     const tokens = Array.isArray(srcOrToks) ? srcOrToks : lex(srcOrToks);
@@ -128,20 +153,45 @@
         tok();
         return { type: "bin", op: "^", left: atom, right: unary() };
       }
+      // 导数撇: f'(x) / f'(x+1) / f'x 已经由 atomp 的 deriv 节点表达
       return atom;
     }
     function atomp() {
       const t = peek();
       if (t.type === "num") { tok(); return { type: "num", value: t.value }; }
       if (t.type === "id") {
+        // dy/dx 优先: 整体识别为隐式函数 f 的导数
+        if (t.value === "dy" && tokens[pos + 1] && tokens[pos + 1].type === "op" && tokens[pos + 1].value === "/" && tokens[pos + 2] && tokens[pos + 2].type === "id" && tokens[pos + 2].value === "dx") {
+          tok(); tok(); tok();
+          return { type: "dyoverdx" };
+        }
         tok();
         const name = t.value;
+        // 导数撇优先: f'(x) / f' / f'x (在括号之前拦截, 保证后继 prime 可被 postfix 消费)
+        if (peek().type === "prime") {
+          tok(); // 吃掉 '
+          let arg = null;
+          if (peek().type === "lp") {
+            tok();
+            arg = expr();
+            expect("rp", "缺右括号");
+          }
+          return { type: "deriv", name, arg };
+        }
         if (peek().type === "lp") {
           if (FUNCTIONS[name] !== undefined || CONSTANTS[name] !== undefined) {
             tok();
             const arg = expr();
             expect("rp", "缺右括号");
             return { type: "call", name, arg };
+          }
+          // logₐ(x) 下标底数形式: id 可能是 log_2
+          const impParen = splitImplicitFnCall(name);
+          if (impParen && (impParen.base !== null)) {
+            tok();
+            const arg = expr();
+            expect("rp", "缺右括号");
+            return { type: "logbase", base: impParen.base, arg };
           }
           if (name === "x") {
             // 变量 x 后跟括号: 隐式乘法 x * (group)
@@ -156,8 +206,36 @@
           expect("rp", "缺右括号");
           return { type: "ucall", name, arg };
         }
+        // 隐式参数形式: lnx, sinx, cos2x, log2x, log2(x), ln x
+        // lexer 会把 lnx 合成为一个 id, 这里拆出函数名, 其余部分重新词法化为实参
+        const imp = splitImplicitFnCall(name);
+        if (imp) {
+          let argNode;
+          if (imp.rest) {
+            // 实参为紧跟的余串 (如 "lnx" 的 "x", "cos2x" 的 "2x")
+            argNode = parseMath(imp.rest);
+          } else {
+            // 完整函数名但参数需消费后续 token (ln 空格 x / ln(2.72))
+            const arg = expr();
+            if (arg) argNode = arg;
+          }
+          if (imp.base !== null) {
+            return { type: "logbase", base: imp.base, arg: argNode };
+          }
+          return { type: "call", name: imp.fn, arg: argNode };
+        }
+        // 空格隐式: ln x / ln 2.72 (函数名单独成 id)
+        if (FUNCTIONS[name] !== undefined && (peek().type === "id" || peek().type === "num" || peek().type === "lp")) {
+          const arg = expr();
+          return { type: "call", name, arg };
+        }
         if (CONSTANTS[name] !== undefined) return { type: "const", name };
         return { type: "var", name };
+      }
+      if (t.type === "id" && t.value === "dy" && tokens[pos + 1] && tokens[pos + 1].type === "op" && tokens[pos + 1].value === "/" && tokens[pos + 2] && tokens[pos + 2].type === "id" && tokens[pos + 2].value === "dx") {
+        // dy/dx: 隐式函数 f 的导数 (默认取 f, 可被其它 context 改写)
+        tok(); tok(); tok();
+        return { type: "dyoverdx" };
       }
       if (t.type === "lp") {
         tok();
@@ -207,6 +285,33 @@
           const f = FUNC_IMPL[n.name];
           if (!f) throw new Error("未知函数: " + n.name);
           return f(a);
+        }
+        case "logbase": {
+          const a = evalNode(n.arg, env);
+          let base = n.base;
+          if (typeof base === "string") {
+            base = CONSTANTS[base] !== undefined ? CONSTANTS[base] : parseFloat(base);
+            if (isNaN(base)) throw new Error("对数底无效: " + n.base);
+          }
+          return Math.log(a) / Math.log(base);
+        }
+        case "deriv": {
+          // 用户函数 f'(x) 数值导数 (中心差分); 缺省实参为 x
+          const fname = n.name;
+          const def = env.reg && env.reg[fname];
+          if (!def || !def.fn) throw new Error("导数需要函数 " + fname + " 定义");
+          const x = n.arg ? evalNode(n.arg, env) : env.x;
+          const h = Math.max(1e-6, Math.abs(x) * 1e-6);
+          const a = def.fn(x + h, env.reg);
+          const b = def.fn(x - h, env.reg);
+          return (a - b) / (2 * h);
+        }
+        case "dyoverdx": {
+          const def = env.reg && env.reg.f;
+          if (!def || !def.fn) throw new Error("dy/dx 需要函数 f 定义");
+          const x = env.x;
+          const h = Math.max(1e-6, Math.abs(x) * 1e-6);
+          return (def.fn(x + h, env.reg) - def.fn(x - h, env.reg)) / (2 * h);
         }
         case "ucall": {
           // 用户函数调用 f(x): 从 registry 取定义 (带递归深度保护)

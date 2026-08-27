@@ -218,8 +218,8 @@
       });
     }
 
-    // 统一自适应采样器: (Yacas 式) 均匀初始网格 -> 对屏幕扁平度偏差 > tol 的段二分细分
-    // evalP(t)->点|null, farP(p,view)->断点判定, tRange(view)->[t0,t1]
+    // 统一自适应采样器: 粗扫描全 t 域找"穿过视口的连续区段", 再对区段内做细分
+    // 解决涨落曲线(矩阵幂特征值>1)用视口四角反推 t 范围导致视口内无采样点的问题
     drawAdaptive(ctx, curve, w, h, spec) {
       const v = this.view;
       const evalP = spec.evalP;
@@ -227,9 +227,13 @@
       const [t0, t1] = spec.tRange(v);
       const span = t1 - t0;
       if (!(span > 0) || !isFinite(span)) return;
-      // 初始步长: 视口每像素取若干样本, 兼收紧凑性
-      const SEG = Math.min(1024, Math.max(32, Math.ceil(w / 6)));
-      const dt = span / SEG;
+      // 粗扫描: 与屏幕宽度弱绑定, 优先保证覆盖
+      const SCAN = Math.min(600, Math.max(48, Math.ceil(w / 4)));
+      const scanDt = span / SCAN;
+      const pad = Math.max(v.x1 - v.x0, v.y1 - v.y0) * 2;
+      const inZone = (p) => p != null && p[0] > v.x0 - pad && p[0] < v.x1 + pad && p[1] > v.y0 - pad && p[1] < v.y1 + pad;
+      const inTight = (p) => p != null && p[0] > v.x0 - pad * 8 && p[0] < v.x1 + pad * 8 && p[1] > v.y0 - pad * 8 && p[1] < v.y1 + pad * 8;
+
       ctx.strokeStyle = curve.color;
       ctx.lineWidth = (curve.width || 2);
       ctx.beginPath();
@@ -248,37 +252,63 @@
         prev = [sx, sy];
       };
 
-      // 预采样: 均匀网格断点检测 + 细分
-      let pPrev = null;
-      for (let i = 0; i <= SEG; i++) {
-        const t = t0 + i * dt;
-        const p0 = evalP(t);
-        if (!p0) { pPrev = null; started = false; prev = null; continue; }
-        if (pPrev) {
-          // 已有段: 画起点(跳过重复), 然后细分
-          if (started) started = true;
-          // 自适应细分: 中点与弦的屏幕偏差 > 0.7px 则继续细分 (箭头函数保持 this)
-          const refine = (tA, tB, k) => {
-            const tm = (tA + tB) / 2;
-            const pm = evalP(tm);
-            if (!pm) return;
-            const [ax, ay] = this.toScreen(pPrev[0], pPrev[1]);
-            const [bx, by] = this.toScreen(p0[0], p0[1]);
-            const [mx, my] = this.toScreen(pm[0], pm[1]);
-            const len = Math.hypot(bx - ax, by - ay) || 1;
-            const dev = Math.abs((bx - ax) * (ay - my) - (ax - mx) * (by - ay)) / len;
-            if (dev > 0.7 && k < 12) {
-              refine(tA, tm, k + 1);
-              plotPt(pm);
-              refine(tm, tB, k + 1);
-            } else {
-              plotPt(pm);
-            }
-          };
-          refine(t - dt, t, 0);
+      // 对一段 [lo,hi] 用二分细分逼近曲线, 段两端离视口过远时不细化
+      // 平坦判据: 中点偏离弦 > tol, 且用"左右子弦的偏差"双重判定, 避免对称函数漏分
+      const walk = (lo, hi, k) => {
+        if (lo >= hi || k > 16) return;
+        const plo = evalP(lo), phi = evalP(hi);
+        if (!plo || !phi) return;
+        if (!inTight(plo) && !inTight(phi)) return;
+        const tm = (lo + hi) / 2;
+        const pm = evalP(tm);
+        if (!pm) return;
+        const [ax, ay] = this.toScreen(plo[0], plo[1]);
+        const [bx, by] = this.toScreen(phi[0], phi[1]);
+        const [mx, my] = this.toScreen(pm[0], pm[1]);
+        const dev = (() => {
+          const len = Math.hypot(bx - ax, by - ay) || 1;
+          return Math.abs((bx - ax) * (ay - my) - (ax - mx) * (by - ay)) / len;
+        })();
+        // 左侧子弦偏差 (每层再取一次四分点, 防止对称抵消)
+        const q1 = evalP((lo + tm) / 2);
+        const devLeft = q1 ? (() => {
+          const [qx, qy] = this.toScreen(q1[0], q1[1]);
+          const ln = Math.hypot(mx - ax, my - ay) || 1;
+          return Math.abs((mx - ax) * (ay - qy) - (ax - qx) * (my - ay)) / ln;
+        })() : 0;
+        // 最小细分保证 + 平坦度判据: 防止对称抵消
+        const needSubdiv = k < 3 || dev > 0.7 || devLeft > 0.7;
+        if (needSubdiv && k < 14) {
+          walk(lo, tm, k + 1);
+          plotPt(pm);
+          walk(tm, hi, k + 1);
+        } else {
+          // 平直段: 连端点 + 中点三点线段
+          plotPt(plo);
+          plotPt(pm);
+          plotPt(phi);
         }
-        plotPt(p0);
-        pPrev = p0;
+      };
+
+      // 第一遍: 找视口附近的连续区段
+      const runs = [];
+      let curRun = null;
+      for (let i = 0; i <= SCAN; i++) {
+        const t = t0 + i * scanDt;
+        const p0 = evalP(t);
+        if (inZone(p0)) {
+          if (curRun) curRun.end = t;
+          else { curRun = { start: t, end: t }; runs.push(curRun); }
+        } else {
+          curRun = null;
+        }
+      }
+      // 第二遍: 细分绘制 (区段两侧各加一个缓冲步长)
+      for (const run of runs) {
+        started = false; prev = null;
+        const ta = run.start - scanDt;
+        const tb = run.end + scanDt;
+        walk(ta, tb, 0);
       }
       ctx.stroke();
     }
