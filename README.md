@@ -11,7 +11,7 @@ MineTransformation
 * 数学运算: `+ - * / ^` 括号、隐式乘法(`2x`, `2(x+1)`, `(x+1)(x-1)`)、右结合幂 `2^3^2`
 * 函数: `sin cos tan asin acos atan sinh cosh tanh sqrt cbrt abs ln log log2 exp floor ceil round sign`
 * 常量: `pi` `e` `tau`
-* 交互: 左键拖拽平移 · 滚轮缩放 · 工具栏缩放/重置 · 右侧图例列表(删除/悬停错误提示) · 悬停坐标显示
+* 交互: 左键拖拽平移 · 滚轮缩放 · 工具栏缩放/重置 · 浮动的表达式面板(☰ 按钮折叠, 不挤压绘图区) · 悬停曲线时浮动显示该点坐标 (x, y) · 悬停坐标状态栏
 
 开发
 ----
