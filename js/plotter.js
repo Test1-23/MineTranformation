@@ -12,7 +12,10 @@
       this.curves = []; // {color, width, draw(x,reg)=>y | evalCurve(t,reg)=>[x,y], kind}
       this.registry = {}; // {name: {fn, source}}
       this.onHover = null;
+      this.hover = null;      // 悬停命中 {x, y, curve, sx, sy}
+      this.hoverThreshold = 12; // 命中半径(px)
       this.dpr = window.devicePixelRatio || 1;
+      this._drag = null;
       this.bindEvents();
     }
 
@@ -31,28 +34,26 @@
         this.requestDraw();
       }, { passive: false });
       // 拖拽平移
-      let drag = null;
       c.addEventListener("mousedown", (e) => {
-        drag = { x: e.clientX, y: e.clientY };
+        this._drag = { x: e.clientX, y: e.clientY };
       });
       window.addEventListener("mousemove", (e) => {
-        if (this.onHover) {
-          const rect = c.getBoundingClientRect();
-          const mx = ((e.clientX - rect.left) / rect.width) * (this.view.x1 - this.view.x0) + this.view.x0;
-          const my = -(((e.clientY - rect.top) / rect.height) * (this.view.y1 - this.view.y0) - this.view.y1);
-          this.onHover(mx, my);
-        }
-        if (drag) {
-          const rect = c.getBoundingClientRect();
-          const dx = ((e.clientX - drag.x) / rect.width) * (this.view.x1 - this.view.x0);
-          const dy = ((e.clientY - drag.y) / rect.height) * (this.view.y1 - this.view.y0);
+        const rect = c.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const mx = (px / rect.width) * (this.view.x1 - this.view.x0) + this.view.x0;
+        const my = -((py / rect.height) * (this.view.y1 - this.view.y0) - this.view.y1);
+        if (this.onHover && !this._drag) this.onHover(mx, my, px, py);
+        if (this._drag) {
+          const dx = ((e.clientX - this._drag.x) / rect.width) * (this.view.x1 - this.view.x0);
+          const dy = ((e.clientY - this._drag.y) / rect.height) * (this.view.y1 - this.view.y0);
           this.view.x0 -= dx; this.view.x1 -= dx;
           this.view.y0 += dy; this.view.y1 += dy;
-          drag = { x: e.clientX, y: e.clientY };
+          this._drag = { x: e.clientX, y: e.clientY };
           this.requestDraw();
         }
       });
-      window.addEventListener("mouseup", () => { drag = null; });
+      window.addEventListener("mouseup", () => { this._drag = null; });
       this.rafPending = false;
     }
 
@@ -104,6 +105,7 @@
       this.drawGrid(ctx, w, h);
       this.drawAxes(ctx, w, h);
       for (const curve of this.curves) {
+        curve.screenPts = [];
         try {
           if (curve.kind === "parametric") this.drawParametric(ctx, curve, w, h);
           else this.drawFunction(ctx, curve, w, h);
@@ -113,6 +115,7 @@
           if (curve.item) curve.item.error = e.message;
         }
       }
+      if (this.hover) this.drawHoverMarker(ctx);
     }
 
     // 网格与刻度
@@ -213,6 +216,7 @@
         const [sx, sy] = this.toScreen(x, y);
         if (started) ctx.lineTo(sx, sy);
         else { ctx.moveTo(sx, sy); started = true; }
+        if (curve.screenPts) curve.screenPts.push([sx, sy, x, y]);
         prevY = y;
       }
       ctx.stroke();
@@ -247,8 +251,36 @@
         }
         if (started) ctx.lineTo(sx, sy);
         else { ctx.moveTo(sx, sy); started = true; }
+        if (curve.screenPts) curve.screenPts.push([sx, sy, p[0], p[1]]);
         prev = [sx, sy];
       }
+      ctx.stroke();
+    }
+
+    // 悬停命中检测: 在(px,py)附近找最近的曲线点, 返回 {curve, x, y, sx, sy}
+    hitTest(px, py) {
+      let best = null;
+      let bestD2 = this.hoverThreshold * this.hoverThreshold;
+      for (const curve of this.curves) {
+        const pts = curve.screenPts;
+        if (!pts) continue;
+        for (const p of pts) {
+          const d2 = (p[0] - px) * (p[0] - px) + (p[1] - py) * (p[1] - py);
+          if (d2 < bestD2) { bestD2 = d2; best = { curve, sx: p[0], sy: p[1], x: p[2], y: p[3] }; }
+        }
+      }
+      return best;
+    }
+
+    drawHoverMarker(ctx) {
+      const hv = this.hover;
+      const [sx, sy] = this.toScreen(hv.x, hv.y);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = hv.color;
       ctx.stroke();
     }
   }

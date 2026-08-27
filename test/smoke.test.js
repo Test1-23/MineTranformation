@@ -99,5 +99,22 @@ T("fmt 格式化", () => {
   if (plotter.fmt(1500000) !== "1.5e6") throw new Error("期望1.5e6");
 });
 
+T("悬停命中检测 hitTest", () => {
+  // 视口 -10..10, canvas 800x600, 画 y = x
+  plotter.view = { x0: -10, x1: 10, y0: -10, y1: 10 };
+  const curve = { kind: "function", color: "#000", draw: (x) => x, item: null };
+  plotter.setCurves([curve]);
+  plotter.draw(); // 填充 screenPts
+  // 屏幕中心 (400,300) 对应 (0,0), y=x 线上
+  const hit = plotter.hitTest(400, 300);
+  if (!hit) throw new Error("未命中");
+  if (Math.abs(hit.x - 0) > 0.2 || Math.abs(hit.y - 0) > 0.2) {
+    throw new Error("命中坐标不对: " + hit.x + "," + hit.y);
+  }
+  // 远离曲线 -> 不命中
+  const miss = plotter.hitTest(100, 100);
+  if (miss) throw new Error("本应不命中");
+});
+
 console.log(failed ? "\n" + failed + " 个测试失败" : "\n冒烟测试全部通过");
 process.exit(failed ? 1 : 0);

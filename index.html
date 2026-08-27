@@ -8,6 +8,7 @@
 </head>
 <body>
   <header class="app-header">
+    <button id="btn-panel" class="btn" title="展开/收起表达式列表">☰</button>
     <div class="app-title">MineTransformation</div>
     <input id="expr-input" class="expr-input" type="text"
       placeholder="输入表达式，如 f(x)=x^2 或 2f(x)" autocomplete="off" spellcheck="false" />
@@ -19,10 +20,11 @@
   </header>
   <main class="app-main">
     <canvas id="plot-canvas"></canvas>
-    <aside id="expr-list" class="expr-list"></aside>
+    <aside id="expr-list" class="expr-list visible"></aside>
+    <div id="point-tip" class="point-tip hidden"></div>
   </main>
   <footer class="app-footer" id="status-bar">
-    左键拖拽平移 · 滚轮缩放 · 输入 f(x)=x^2 定义函数，2f(x)、f(2x)、M(0 1 1 2) 施加变换
+    左键拖拽平移 · 滚轮缩放 · 悬停曲线查看坐标 · 输入 f(x)=x^2 定义函数，2f(x)、f(2x)、M(0 1 1 2) 施加变换
   </footer>
   <div id="help-modal" class="modal hidden">
     <div class="modal-card">
@@ -32,6 +34,7 @@
         <li>函数变换：<code>2f(x)</code>（纵伸缩）、<code>f(2x)</code>（横伸缩）、<code>f(x)+3</code>（平移）</li>
         <li>矩阵变换：<code>M(0 1; 1 2)</code> 作用于 (x, f(x))</li>
         <li>支持运算：+ − * / ^ sqrt sin cos tan log abs 等</li>
+        <li>鼠标悬停曲线可查看对应点的坐标</li>
       </ul>
       <button id="btn-close-help" class="btn btn-primary">关闭</button>
     </div>
